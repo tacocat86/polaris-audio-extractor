@@ -1,6 +1,7 @@
 import subprocess
 import json
 from pathlib import Path
+from audio_extractor.formats import validate_format, get_codec_for_format
 
 
 def probe(input_path: Path) -> dict:
@@ -30,20 +31,17 @@ def build_ffmpeg_cmd(
     input_path: Path,
     output_path: Path,
     codec: str = "libmp3lame",
-    bitrate: str = "192k",
+    bitrate: str | None = "192k",
     overwrite: bool = False,
 ) -> list[str]:
     """Build the ffmpeg command list."""
     cmd = ["ffmpeg"]
     if overwrite:
         cmd.append("-y")
-    cmd += [
-        "-i", str(input_path),
-        "-vn",
-        "-acodec", codec,
-        "-ab", bitrate,
-        str(output_path),
-    ]
+    cmd += ["-i", str(input_path), "-vn", "-acodec", codec]
+    if bitrate:
+        cmd += ["-ab", bitrate]
+    cmd.append(str(output_path))
     return cmd
 
 
@@ -51,18 +49,20 @@ def extract(
     input_path: Path,
     output_dir: Path | None = None,
     fmt: str = "mp3",
-    codec: str = "libmp3lame",
-    bitrate: str = "192k",
+    codec: str | None = None,
+    bitrate: str | None = None,
     overwrite: bool = False,
     dry_run: bool = False,
 ) -> Path:
-    """
-    Extract audio from a video file.
-    Returns the output path.
-    """
     input_path = Path(input_path).resolve()
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
+
+    # Validate format and resolve codec/bitrate from FORMAT_MAP if not overridden
+    validate_format(fmt)
+    resolved_codec, resolved_bitrate = get_codec_for_format(fmt)
+    codec = codec or resolved_codec
+    bitrate = bitrate or resolved_bitrate
 
     output_path = resolve_output_path(input_path, output_dir, fmt)
     cmd = build_ffmpeg_cmd(input_path, output_path, codec, bitrate, overwrite)
