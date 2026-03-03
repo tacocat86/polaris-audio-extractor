@@ -1,0 +1,16 @@
+[project]
+name = "audio-extractor"
+version = "0.1.0"
+description = "Extract audio from video files via ffmpeg"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "rich"]
+
+[project.scripts]
+extract-audio = "audio_extractor.cli:main"
+
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
