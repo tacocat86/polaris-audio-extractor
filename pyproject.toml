@@ -3,7 +3,7 @@ name = "audio-extractor"
 version = "0.1.0"
 description = "Extract audio from video files via ffmpeg"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["tomli-w"]
 
 [project.optional-dependencies]
 dev = ["pytest", "rich"]
