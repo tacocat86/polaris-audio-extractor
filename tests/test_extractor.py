@@ -1,5 +1,4 @@
 from pathlib import Path
-import pytest
 from audio_extractor.extractor import resolve_output_path, build_ffmpeg_cmd, extract
 
 

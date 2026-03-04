@@ -1,4 +1,3 @@
-from pathlib import Path
 from audio_extractor.utils import find_video_files
 
 
