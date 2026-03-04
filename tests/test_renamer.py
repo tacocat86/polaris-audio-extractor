@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch
+from pathlib import Path
 from audio_extractor.renamer import parse_filename, propose_rename
 
 
@@ -20,7 +21,8 @@ def test_propose_rename_no_change_needed(tmp_path, monkeypatch):
 
 
 def test_propose_rename_user_confirms(tmp_path, monkeypatch):
-    audio_file = tmp_path / "USSR Aerospace - Simpsonwave 1995.mp3"
+    # Messy filename that parses to a different clean name
+    audio_file = tmp_path / "ussraerospace_simpsonwave1995_HQ.mp3"
     audio_file.write_bytes(b"")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     with patch("audio_extractor.renamer.parse_filename") as mock_parse, \
