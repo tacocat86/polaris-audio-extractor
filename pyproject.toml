@@ -6,7 +6,7 @@ requires-python = ">=3.10"
 dependencies = ["tomli-w"]
 
 [project.optional-dependencies]
-dev = ["pytest", "rich"]
+dev = ["pytest", "rich", "ruff"]
 
 [project.scripts]
 extract-audio = "audio_extractor.cli:main"

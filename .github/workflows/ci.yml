@@ -10,5 +10,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev]"
-      - run: pytest
+      - name: Install ffmpeg
+        run: sudo apt-get install -y ffmpeg
+      - name: Install package
+        run: pip install -e ".[dev]"
+      - name: Generate fixture video
+        run: |
+          mkdir -p tests/fixtures
+          ffmpeg -f lavfi -i "sine=frequency=440:duration=2" \
+            -f lavfi -i color=c=blue:size=320x240:duration=2 \
+            -shortest tests/fixtures/sample.mp4 -y -loglevel quiet
+      - name: Lint with ruff
+        run: ruff check .
+      - name: Run tests
+        run: pytest tests/ -v
