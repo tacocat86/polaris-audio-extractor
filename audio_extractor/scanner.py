@@ -1,9 +1,10 @@
 from pathlib import Path
 from audio_extractor.extractor import extract
 from audio_extractor.config import load_config, ensure_dirs
+from audio_extractor.renamer import propose_rename
 
 
-def scan(dry_run: bool = False, overwrite: bool = False) -> None:
+def scan(dry_run: bool = False, overwrite: bool = False, rename: bool = False) -> None:
     config = load_config()
     ensure_dirs(config)
 
@@ -27,7 +28,7 @@ def scan(dry_run: bool = False, overwrite: bool = False) -> None:
 
     for video in sorted(video_files):
         try:
-            extract(
+            output = extract(
                 input_path=video,
                 output_dir=output_dir,
                 fmt=audio_fmt,
@@ -36,5 +37,7 @@ def scan(dry_run: bool = False, overwrite: bool = False) -> None:
                 overwrite=overwrite,
                 dry_run=dry_run,
             )
+            if rename and not dry_run:
+                propose_rename(output)
         except (FileNotFoundError, RuntimeError) as e:
             print(f"  Error processing {video.name}: {e}")

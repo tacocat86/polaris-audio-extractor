@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from audio_extractor.extractor import extract
 from audio_extractor.utils import find_video_files, write_log
 from audio_extractor.progress import make_progress, print_summary
+from audio_extractor.renamer import propose_rename
 
 
 def process_one(
@@ -12,8 +13,8 @@ def process_one(
     fmt: str,
     overwrite: bool,
     dry_run: bool,
+    rename: bool = False,
 ) -> dict:
-    """Extract audio from a single file, return result dict."""
     try:
         output = extract(
             input_path=video,
@@ -22,7 +23,10 @@ def process_one(
             overwrite=overwrite,
             dry_run=dry_run,
         )
-        # Detect skip vs success by checking if file already existed
+        if rename and not dry_run:
+            proposed = propose_rename(output)
+            if proposed:
+                output = proposed
         status = "skipped" if (output.exists() and not dry_run and not overwrite
                                and output.stat().st_size > 0) else "success"
         return {"input": str(video), "output": str(output),
@@ -41,6 +45,7 @@ def run_batch(
     recursive: bool = False,
     workers: int = 1,
     log_file: Path | None = None,
+    rename: bool = False,
 ) -> None:
     max_workers = min(workers, os.cpu_count() or 1)
     video_files = find_video_files(folder, recursive=recursive)
@@ -59,7 +64,7 @@ def run_batch(
 
         if max_workers == 1:
             for video in video_files:
-                result = process_one(video, output_dir, fmt, overwrite, dry_run)
+                result = process_one(video, output_dir, fmt, overwrite, dry_run, rename)
                 results.append(result)
                 progress.advance(task)
         else:
@@ -67,7 +72,7 @@ def run_batch(
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 for video in video_files:
                     f = executor.submit(
-                        process_one, video, output_dir, fmt, overwrite, dry_run
+                        process_one, video, output_dir, fmt, overwrite, dry_run, rename
                     )
                     futures[f] = video
                 for future in as_completed(futures):

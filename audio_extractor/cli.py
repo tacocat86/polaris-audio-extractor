@@ -6,6 +6,7 @@ from audio_extractor.extractor import extract
 from audio_extractor.scanner import scan
 from audio_extractor.formats import list_formats
 from audio_extractor.batch import run_batch
+from audio_extractor.renamer import propose_rename
 
 
 def main():
@@ -16,8 +17,7 @@ def main():
     parser.add_argument("input", type=Path, nargs="?", default=None,
                         help="Input video file or folder")
     parser.add_argument("-o", "--output-dir", type=Path, default=None)
-    parser.add_argument("-f", "--format", default="mp3",
-                        help="Output format (default: mp3)")
+    parser.add_argument("-f", "--format", default="mp3")
     parser.add_argument("--codec", default=None)
     parser.add_argument("--bitrate", default=None)
     parser.add_argument("--overwrite", action="store_true")
@@ -28,6 +28,8 @@ def main():
     parser.add_argument("--workers", type=int, default=1,
                         help=f"Parallel workers (default: 1, max: {os.cpu_count()})")
     parser.add_argument("--log-file", type=Path, default=None)
+    parser.add_argument("--rename", action="store_true",
+                        help="Use Claude AI to propose rename after extraction")
     parser.add_argument("--version", action="version",
                         version=f"%(prog)s {__version__}")
 
@@ -37,7 +39,7 @@ def main():
         list_formats()
 
     elif args.scan:
-        scan(dry_run=args.dry_run, overwrite=args.overwrite)
+        scan(dry_run=args.dry_run, overwrite=args.overwrite, rename=args.rename)
 
     elif args.input and args.input.is_dir():
         run_batch(
@@ -49,6 +51,7 @@ def main():
             recursive=args.recursive,
             workers=args.workers,
             log_file=args.log_file,
+            rename=args.rename,
         )
 
     elif args.input:
@@ -64,6 +67,8 @@ def main():
             )
             if not args.dry_run:
                 print(f"Done: {output}")
+                if args.rename:
+                    propose_rename(output)
         except (FileNotFoundError, RuntimeError, ValueError) as e:
             print(f"Error: {e}")
             raise SystemExit(1)
