@@ -1,96 +1,106 @@
-import os
 import json
 import urllib.request
 import urllib.error
 from pathlib import Path
 
+DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+MODEL = "llama3.1:70b"
+CONFIDENCE_THRESHOLD = 0.7
 
-API_URL = "https://api.anthropic.com/v1/messages"
-MODEL = "claude-sonnet-4-20250514"
+PROMPT_TEMPLATE = """You are a music metadata assistant. You must respond with raw JSON only. No explanation. No code. No markdown. Only a JSON object.
 
-SYSTEM_PROMPT = """You are a music metadata parser. Given a raw filename (without extension),
-extract the artist and title. The filename may follow patterns like:
-- Artist - Title
-- Title (Artist)
-- Artist - Title (Year)
-- Messy or ambiguous names
+Given this music filename: {stem}
 
-Respond ONLY with a JSON object in this exact format, no preamble or markdown:
-{"artist": "Artist Name", "title": "Song Title", "confident": true}
+Respond with exactly this structure using your knowledge:
+{{"artist": "artist name or null", "title": "song title or null", "confidence": 0.0}}
 
-If you cannot confidently determine both artist and title, set confident to false and
-make your best guess. Never return anything other than this JSON object."""
+Rules:
+- confidence is a float between 0.0 and 1.0
+- Use null (not empty string) if you cannot determine artist or title
+- Raw JSON only."""
 
 
-def parse_filename(stem: str) -> dict:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY environment variable not set. "
-            "Export it with: export ANTHROPIC_API_KEY=your_key"
-        )
-
+def query_ollama(stem: str, host: str = DEFAULT_OLLAMA_HOST) -> dict:
+    """Call the Ollama API and return parsed JSON metadata."""
+    url = f"{host.rstrip('/')}/api/generate"
+    prompt = PROMPT_TEMPLATE.format(stem=stem)
     payload = json.dumps({
         "model": MODEL,
-        "max_tokens": 200,
-        "system": SYSTEM_PROMPT,
-        "messages": [
-            {"role": "user", "content": f"Filename: {stem}"}
-        ]
+        "prompt": prompt,
+        "stream": False,
     }).encode()
 
     req = urllib.request.Request(
-        API_URL,
+        url,
         data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-        },
+        headers={"Content-Type": "application/json"},
         method="POST",
     )
 
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read())
-            text = data["content"][0]["text"].strip()
-            return json.loads(text)
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"Anthropic API error {e.code}: {e.read().decode()}")
+            return json.loads(data["response"])
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Ollama unreachable at {host}: {e}")
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"Failed to parse API response as JSON: {e}")
+        raise RuntimeError(f"Failed to parse Ollama response as JSON: {e}")
 
 
-def propose_rename(output_path: Path) -> Path | None:
+def propose_rename(
+    output_path: Path,
+    ollama_host: str = DEFAULT_OLLAMA_HOST,
+    auto: bool = False,
+) -> Path | None:
+    """
+    Query Ollama to propose a rename for the extracted audio file.
+
+    auto=False (single file): interactive y/N prompt
+    auto=True  (batch mode):  apply automatically if confidence >= threshold
+    """
     stem = output_path.stem
     ext = output_path.suffix
 
-    print(f"\nParsing filename: '{stem}'")
+    print(f"\n  Parsing filename: '{stem}'")
     try:
-        result = parse_filename(stem)
+        result = query_ollama(stem, ollama_host)
     except RuntimeError as e:
         print(f"  Rename skipped — {e}")
         return None
 
-    artist = result.get("artist", "").strip()
-    title = result.get("title", "").strip()
-    confident = result.get("confident", False)
+    artist = (result.get("artist") or "").strip()
+    title = (result.get("title") or "").strip()
+    confidence = float(result.get("confidence", 0.0))
 
     if not artist or not title:
-        print("  Rename skipped — could not parse artist/title")
+        print(f"  Rename skipped — artist/title not determined "
+              f"(confidence: {confidence:.2f})")
         return None
 
-    confidence_note = "" if confident else " (low confidence)"
+    if confidence < CONFIDENCE_THRESHOLD:
+        print(f"  Rename skipped — confidence too low "
+              f"({confidence:.2f} < {CONFIDENCE_THRESHOLD:.2f})")
+        print(f"  Best guess was: '{artist} - {title}' — log for manual review")
+        return None
+
     new_name = f"{artist} - {title}{ext}"
     new_path = output_path.parent / new_name
 
-    print(f"  Proposed rename{confidence_note}:")
-    print(f"    {output_path.name}")
-    print(f"    → {new_name}")
-
     if new_path == output_path:
-        print("  No change needed.")
+        print("  No rename needed — filename already correct.")
         return None
+
+    if new_path.exists():
+        print(f"  Rename skipped — target already exists: {new_name}")
+        return None
+
+    confidence_note = f" (confidence: {confidence:.2f})"
+    print(f"  Proposed{confidence_note}: {output_path.name} → {new_name}")
+
+    if auto:
+        output_path.rename(new_path)
+        print(f"  Renamed: {new_name}")
+        return new_path
 
     answer = input("  Apply rename? [y/N] ").strip().lower()
     if answer == "y":

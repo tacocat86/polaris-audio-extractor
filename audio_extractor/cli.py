@@ -6,7 +6,7 @@ from audio_extractor.extractor import extract
 from audio_extractor.scanner import scan
 from audio_extractor.formats import list_formats
 from audio_extractor.batch import run_batch
-from audio_extractor.renamer import propose_rename
+from audio_extractor.renamer import propose_rename, DEFAULT_OLLAMA_HOST
 
 
 def main():
@@ -29,7 +29,10 @@ def main():
                         help=f"Parallel workers (default: 1, max: {os.cpu_count()})")
     parser.add_argument("--log-file", type=Path, default=None)
     parser.add_argument("--rename", action="store_true",
-                        help="Use Claude AI to propose rename after extraction")
+                        help="Use local Ollama AI node to rename after extraction")
+    parser.add_argument("--ollama-host", default=DEFAULT_OLLAMA_HOST,
+                        help=f"Ollama API host (default: {DEFAULT_OLLAMA_HOST}). "
+                             f"Use Tailscale IP for remote node, e.g. http://100.105.15.86:11434")
     parser.add_argument("--version", action="version",
                         version=f"%(prog)s {__version__}")
 
@@ -52,6 +55,7 @@ def main():
             workers=args.workers,
             log_file=args.log_file,
             rename=args.rename,
+            ollama_host=args.ollama_host,
         )
 
     elif args.input:
@@ -65,10 +69,10 @@ def main():
                 overwrite=args.overwrite,
                 dry_run=args.dry_run,
             )
-            if not args.dry_run:
+            if not args.dry_run and args.rename:
+                propose_rename(output, ollama_host=args.ollama_host, auto=False)
+            elif not args.dry_run:
                 print(f"Done: {output}")
-                if args.rename:
-                    propose_rename(output)
         except (FileNotFoundError, RuntimeError, ValueError) as e:
             print(f"Error: {e}")
             raise SystemExit(1)

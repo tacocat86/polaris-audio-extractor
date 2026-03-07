@@ -1,10 +1,10 @@
 import os
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from audio_extractor.extractor import extract
+from audio_extractor.extractor import extract, resolve_output_path
 from audio_extractor.utils import find_video_files, write_log
 from audio_extractor.progress import make_progress, print_summary
-from audio_extractor.renamer import propose_rename
+from audio_extractor.renamer import propose_rename, DEFAULT_OLLAMA_HOST
 
 
 def process_one(
@@ -14,8 +14,13 @@ def process_one(
     overwrite: bool,
     dry_run: bool,
     rename: bool = False,
+    ollama_host: str = DEFAULT_OLLAMA_HOST,
 ) -> dict:
     try:
+        # Check existence BEFORE extraction to correctly classify status
+        expected_output = resolve_output_path(video, output_dir, fmt)
+        already_existed = expected_output.exists() and not overwrite
+
         output = extract(
             input_path=video,
             output_dir=output_dir,
@@ -23,12 +28,12 @@ def process_one(
             overwrite=overwrite,
             dry_run=dry_run,
         )
-        if rename and not dry_run:
-            proposed = propose_rename(output)
+        if rename and not dry_run and not already_existed:
+            proposed = propose_rename(output, ollama_host=ollama_host, auto=True)
             if proposed:
                 output = proposed
-        status = "skipped" if (output.exists() and not dry_run and not overwrite
-                               and output.stat().st_size > 0) else "success"
+
+        status = "skipped" if already_existed else "success"
         return {"input": str(video), "output": str(output),
                 "status": status, "error": None}
     except Exception as e:
@@ -46,6 +51,7 @@ def run_batch(
     workers: int = 1,
     log_file: Path | None = None,
     rename: bool = False,
+    ollama_host: str = DEFAULT_OLLAMA_HOST,
 ) -> None:
     max_workers = min(workers, os.cpu_count() or 1)
     video_files = find_video_files(folder, recursive=recursive)
@@ -55,7 +61,8 @@ def run_batch(
         return
 
     print(f"Found {len(video_files)} video file(s) — "
-          f"workers: {max_workers}, dry-run: {dry_run}")
+          f"workers: {max_workers}, dry-run: {dry_run}"
+          + (f", ollama-host: {ollama_host}" if rename else ""))
 
     results = []
 
@@ -64,7 +71,9 @@ def run_batch(
 
         if max_workers == 1:
             for video in video_files:
-                result = process_one(video, output_dir, fmt, overwrite, dry_run, rename)
+                result = process_one(
+                    video, output_dir, fmt, overwrite, dry_run, rename, ollama_host
+                )
                 results.append(result)
                 progress.advance(task)
         else:
@@ -72,7 +81,8 @@ def run_batch(
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 for video in video_files:
                     f = executor.submit(
-                        process_one, video, output_dir, fmt, overwrite, dry_run, rename
+                        process_one, video, output_dir, fmt,
+                        overwrite, dry_run, rename, ollama_host
                     )
                     futures[f] = video
                 for future in as_completed(futures):
