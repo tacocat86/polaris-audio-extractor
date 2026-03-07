@@ -2,6 +2,7 @@ import json
 import urllib.request
 import urllib.error
 from pathlib import Path
+from audio_extractor.identifier import identify, has_derivative_marker
 
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 MODEL = "llama3.1:70b"
@@ -11,12 +12,16 @@ PROMPT_TEMPLATE = """You are a music metadata assistant. You must respond with r
 
 Given this music filename: {stem}
 
+This file comes from a personal media library containing phonk, lofi, vaporwave, dark ambient, and underground electronic music. Many artists are indie or obscure. Do NOT default to well-known mainstream artists unless the filename strongly and specifically matches them.
+
 Respond with exactly this structure using your knowledge:
 {{"artist": "artist name or null", "title": "song title or null", "confidence": 0.0}}
 
 Rules:
 - confidence is a float between 0.0 and 1.0
 - Use null (not empty string) if you cannot determine artist or title
+- If the filename looks like a genre label or mood descriptor rather than a specific track (e.g. NIGHT PHONK, DREAM SPACE, ENDLESS VOID), return null for both fields with confidence 0.0
+- Do NOT guess a mainstream artist for an ambiguous title — return null if unsure
 - Raw JSON only."""
 
 
@@ -52,21 +57,39 @@ def propose_rename(
     ollama_host: str = DEFAULT_OLLAMA_HOST,
     auto: bool = False,
 ) -> Path | None:
-    """
-    Query Ollama to propose a rename for the extracted audio file.
-
-    auto=False (single file): interactive y/N prompt
-    auto=True  (batch mode):  apply automatically if confidence >= threshold
-    """
     stem = output_path.stem
     ext = output_path.suffix
 
     print(f"\n  Parsing filename: '{stem}'")
+
+    # Tier 1 & 2 — AcoustID fingerprint + MusicBrainz text search
+    result = None
     try:
-        result = query_ollama(stem, ollama_host)
-    except RuntimeError as e:
-        print(f"  Rename skipped — {e}")
-        return None
+        result = identify(output_path)
+        if result:
+            source = result.get("source", "unknown")
+            print(f"  Identified via {source} "
+                  f"(confidence: {result['confidence']:.2f})")
+    except Exception as e:
+        print(f"  Identification error: {e} — falling back to Ollama")
+
+    # Tier 3 — Ollama fallback
+    # Skip Ollama for derivative edits (slowed, reverb, remix, etc.)
+    # These are modified versions of original tracks — Ollama will identify
+    # the original, not the edit, producing a misleading rename.
+    if not result:
+        if has_derivative_marker(stem):
+            print(f"  Rename skipped — derivative edit detected "
+                  f"(slowed/reverb/remix/etc.). Keeping original filename.")
+            return None
+
+        try:
+            result = query_ollama(stem, ollama_host)
+            if result:
+                result["source"] = "ollama"
+        except RuntimeError as e:
+            print(f"  Rename skipped — {e}")
+            return None
 
     artist = (result.get("artist") or "").strip()
     title = (result.get("title") or "").strip()
@@ -94,8 +117,9 @@ def propose_rename(
         print(f"  Rename skipped — target already exists: {new_name}")
         return None
 
-    confidence_note = f" (confidence: {confidence:.2f})"
-    print(f"  Proposed{confidence_note}: {output_path.name} → {new_name}")
+    source = result.get("source", "unknown")
+    print(f"  Proposed [{source}] (confidence: {confidence:.2f}): "
+          f"{output_path.name} → {new_name}")
 
     if auto:
         output_path.rename(new_path)

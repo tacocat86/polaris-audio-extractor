@@ -65,6 +65,7 @@ def extract(
     bitrate = bitrate or resolved_bitrate
 
     output_path = resolve_output_path(input_path, output_dir, fmt)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = build_ffmpeg_cmd(input_path, output_path, codec, bitrate, overwrite)
 
     if dry_run:
